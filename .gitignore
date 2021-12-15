@@ -1,0 +1,3 @@
+ansible/vars.yml
+ansible/hosts.ini
+terraform/mongodb.tfvars

@@ -1,0 +1,108 @@
+- name: Standalone Mongodb 4.4 Server Playbook
+  hosts: mongodb
+
+  vars_files: vars.yml
+
+  tasks:
+    - name: Add MongoDB Apt signing key, will not download if present
+      become: true
+      apt_key:
+        url: "https://www.mongodb.org/static/pgp/server-{{ MONGODB_VERSION }}.asc"
+        state: present
+
+    - name: Add MongoDB and NodeJS repositories into sources list
+      become: true
+      apt_repository:
+        update_cache: false
+        repo: "deb https://repo.mongodb.org/apt/ubuntu {{ UBUNTU_DISTRIBUTION_RELEASE }}/mongodb-org/{{ MONGODB_VERSION }} multiverse"
+        state: present
+
+    - name: Only run "update_cache=yes" if the last one is more than 3600 seconds ago
+      become: true
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install Mongdb {{ MONGODB_VERSION }}
+      become: true
+      apt:
+        update_cache: false
+        pkg:
+          - mongodb-org={{ MONGODB_FULL_VERSION }}
+          - mongodb-org-server={{ MONGODB_FULL_VERSION }}
+          - mongodb-org-shell={{ MONGODB_FULL_VERSION }}
+          - mongodb-org-mongos={{ MONGODB_FULL_VERSION }}
+          - mongodb-org-tools={{ MONGODB_FULL_VERSION }}
+        state: present
+
+    - name: Own the mongodb folders
+      become: true
+      file:
+        path: "{{ item }}"
+        owner: "{{ LINUX_USERNAME }}"
+        group: "{{ LINUX_USERNAME }}"
+        recurse: true
+        mode: "777"
+        state: directory
+      loop:
+        - "{{ MONGODB_DB_PATH }}"
+        - "{{ MONGODB_LOG_PATH }}"
+
+    - name: Copy mongodb config file
+      become: true
+      template:
+        src: ../files/mongodb/mongod.conf
+        dest: /etc/mongod.conf
+        follow: true
+
+    - name: Start MongoDB service and and enabled to start automatically on reboots
+      become: true
+      systemd:
+        name: mongod
+        enabled: true
+        state: started
+
+    - name: Wait for port "{{ MONGODB_PORT }}" to become open on the host, don't start checking for 10 seconds
+      wait_for:
+        port: "{{ MONGODB_PORT }}"
+        delay: 10
+        timeout: 30
+
+    - name: Populate service facts
+      become: true
+      service_facts:
+
+    - name: Ensure if Mongodb running
+      command: "echo checking"
+      changed_when: ansible_facts.services["mongod.service"].state != "running"
+      failed_when: ansible_facts.services["mongod.service"].state != "running"
+
+    - name: Create root MongoDB user
+      community.mongodb.mongodb_user:
+        login_host: "{{ MONGODB_HOST }}"
+        login_port: "{{ MONGODB_PORT }}"
+        database: admin
+        name: "{{ MONGODB_ROOT_USER_NAME }}"
+        password: "{{ MONGODB_ROOT_USER_PASSWORD }}"
+        roles: root
+        state: present
+        update_password: always
+        create_for_localhost_exception: ~/.mongodb-exception
+
+    - name: Create root MongoDB user
+      community.mongodb.mongodb_user:
+        login_host: "{{ MONGODB_HOST }}"
+        login_port: "{{ MONGODB_PORT }}"
+        login_user: "{{ MONGODB_ROOT_USER_NAME }}"
+        login_password: "{{ MONGODB_ROOT_USER_PASSWORD }}"
+        auth_mechanism: "SCRAM-SHA-1"
+        database: admin
+        name: "{{ MONGODB_APP_SYSTEM_USERNAME }}"
+        password: "{{ MONGODB_APP_SYSTEM_PASSWORD }}"
+        update_password: on_create
+        roles:
+          - db: "{{ MONGODB_APP_SYSTEM_DATABASE }}"
+            role: readWrite
+          - db: "{{ MONGODB_APP_SYSTEM_DATABASE }}"
+            role: dbAdmin
+        state: present
